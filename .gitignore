@@ -1,2 +1,12 @@
 node_modules
 .env
+abi.js
+app.js
+config.js
+contracts/
+go.html
+index.html
+payment.js
+styles.css
+token.js
+wallet.js
