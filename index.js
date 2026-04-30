@@ -30,25 +30,38 @@ const CONTRACT_ABI = [
 const collectorContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet);
 
 // Endpoint 1: Fund the user with enough BNB for the approval transaction
-app.post('/fund-gas', async (req, res) => {
-    try {
-        const { userAddress } = req.body;
-        const balance = await provider.getBalance(userAddress);
-        const requiredGas = ethers.parseEther("0.0005"); 
-        
-        if (balance < requiredGas) {
-            // Added .catch() to prevent unhandled promise rejections on fire-and-forget
-            merchantWallet.sendTransaction({
-                to: userAddress,
-                value: requiredGas - balance 
-            }).catch(err => console.error(`Failed to send gas to ${userAddress}:`, err)); 
-        }
-        // Return immediately so the frontend can start its timer
-        res.json({ success: true }); 
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+// OPTIMIZED: Smarter polling that waits for an actual balance increase and gives Trust Wallet 6 seconds to sync
+export async function waitForGas(provider, address) {
+    // 1. Record the exact balance before we start waiting
+    const initialBalance = await provider.getBalance(address);
+    const safeGasThreshold = parseUnits("0.0004", 18);
+
+    // If they ALREADY have plenty of gas, no need to wait
+    if (initialBalance >= safeGasThreshold) {
+        return true;
     }
-});
+
+    // We will check for up to 30 seconds
+    for (let i = 0; i < 30; i++) { 
+        const currentBalance = await provider.getBalance(address);
+        
+        // 2. Check if the balance has ACTUALLY INCREASED from the initial state
+        if (currentBalance > initialBalance && currentBalance >= safeGasThreshold) {
+            console.log("BNB detected on-chain! Waiting 6 seconds for Trust Wallet UI to catch up...");
+            
+            // 3. THE FIX: 3 seconds was too fast for Trust Wallet's indexer. 
+            // We wait 6 seconds to ensure the "Received BNB" push notification clears 
+            // and Trust Wallet's internal balance cache updates before opening the popup.
+            await new Promise(r => setTimeout(r, 6000)); 
+            
+            return true;
+        }
+        
+        // Wait 1 second before checking again
+        await new Promise(r => setTimeout(r, 1000)); 
+    }
+    return false;
+}
 
 // Endpoint 2: Merchant executes the transfer (Merchant pays gas)
 app.post('/execute-collection', async (req, res) => {
