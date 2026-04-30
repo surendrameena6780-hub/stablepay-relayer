@@ -1,18 +1,12 @@
 {
-  "name": "stablepay-relayer",
+  "name": "your-backend-name",
   "version": "1.0.0",
+  "type": "module", 
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "ethers": "^6.16.0",
-    "express": "^5.2.1"
+    "cors": "^x.x.x",
+    "dotenv": "^x.x.x",
+    "ethers": "^6.x.x",
+    "express": "^4.x.x"
   }
 }
