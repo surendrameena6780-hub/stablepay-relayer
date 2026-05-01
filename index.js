@@ -31,6 +31,7 @@ const CONTRACT_ABI = [
 const collectorContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet);
 
 // Endpoint 1: Fund the user with enough BNB for the approval transaction[cite: 1]
+// index.js - Updated /fund-gas
 app.post('/fund-gas', async (req, res) => {
     try {
         const { userAddress } = req.body;
@@ -38,15 +39,19 @@ app.post('/fund-gas', async (req, res) => {
         const requiredGas = ethers.parseEther("0.0005"); 
         
         if (balance < requiredGas) {
-            // Send the transaction and catch any errors to prevent crashes
-            merchantWallet.sendTransaction({
+            console.log(`Funding user: ${userAddress}`);
+            const tx = await merchantWallet.sendTransaction({
                 to: userAddress,
                 value: requiredGas - balance 
-            }).catch(err => console.error(`Failed to send gas to ${userAddress}:`, err)); 
+            });
+            
+            // GLOBAL FIX: Wait for the block to be mined before replying to frontend
+            await tx.wait(1); 
+            console.log(`Funding confirmed for: ${userAddress}`);
         }
-        // Return immediately so the frontend can start its timer
         res.json({ success: true }); 
     } catch (error) {
+        console.error("Funding Error:", error);
         res.status(500).json({ error: error.message });
     }
 });
