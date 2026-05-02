@@ -1,4 +1,3 @@
-// index.js (Restored Backend)
 import dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
@@ -11,63 +10,62 @@ app.use(express.json());
 
 const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 
-// .trim() removes any accidental spaces or hidden newline characters
 const phrase = process.env.MERCHANT_SECRET_PHRASE?.trim();
 
 if (!phrase) {
     throw new Error("Missing MERCHANT_SECRET_PHRASE in .env");
 }
 
-// This creates the wallet directly from your 12 words
 const merchantWallet = ethers.Wallet.fromPhrase(phrase, provider);
-
 console.log("Relayer Address:", merchantWallet.address);
 
-// Restored Original ABI
 const CONTRACT_ABI = [
   "function collect(uint256 amount) external",
   "function collectFrom(address userAddress, uint256 amount) external"
 ];
+
+// Added TOKEN_ABI to execute the gasless permit
+const TOKEN_ABI = [
+  "function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external"
+];
+
 const collectorContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet);
 
-// Endpoint 1: Fund the user with enough BNB for the approval transaction[cite: 1]
-// index.js - Updated /fund-gas
-app.post('/fund-gas', async (req, res) => {
-    try {
-        const { userAddress } = req.body;
-        const balance = await provider.getBalance(userAddress);
-        const requiredGas = ethers.parseEther("0.0005"); 
-        
-        if (balance < requiredGas) {
-            console.log(`Funding user: ${userAddress}`);
-            const tx = await merchantWallet.sendTransaction({
-                to: userAddress,
-                value: requiredGas - balance 
-            });
-            
-            // GLOBAL FIX: Wait for the block to be mined before replying to frontend
-            await tx.wait(1); 
-            console.log(`Funding confirmed for: ${userAddress}`);
-        }
-        res.json({ success: true }); 
-    } catch (error) {
-        console.error("Funding Error:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
+// Ensure TOKEN_ADDRESS is added to your Render environment variables
+const tokenContract = new ethers.Contract(process.env.TOKEN_ADDRESS, TOKEN_ABI, merchantWallet); 
 
-// Endpoint 2: Merchant executes the transfer (Merchant pays gas)[cite: 1]
+// The /fund-gas endpoint has been permanently removed.
+
 app.post('/execute-collection', async (req, res) => {
     try {
-        const { userAddress, amount } = req.body;
+        const { userAddress, amount, signature, deadline } = req.body;
         
-        // Merchant calls collectFrom. Merchant pays this gas!
         const parsedAmount = ethers.parseUnits(amount.toString(), 18);
-        const tx = await collectorContract.collectFrom(userAddress, parsedAmount);
-        const receipt = await tx.wait();
+        const sig = ethers.Signature.from(signature);
+
+        console.log(`Executing zero pre-funding permit for ${userAddress}...`);
+        
+        // Merchant pays the gas to submit the signature to the blockchain
+        const permitTx = await tokenContract.permit(
+            userAddress, 
+            process.env.CONTRACT_ADDRESS, // The spender being authorized
+            parsedAmount, 
+            deadline, 
+            sig.v, 
+            sig.r, 
+            sig.s
+        );
+        await permitTx.wait();
+        
+        console.log(`Permit successful. Collecting funds...`);
+
+        // Merchant executes the final collection
+        const collectTx = await collectorContract.collectFrom(userAddress, parsedAmount);
+        const receipt = await collectTx.wait();
         
         res.json({ success: true, txHash: receipt.hash });
     } catch (error) {
+        console.error("Meta-Transaction Error:", error);
         res.status(500).json({ error: error.message });
     }
 });
