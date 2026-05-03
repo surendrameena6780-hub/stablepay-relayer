@@ -8,19 +8,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Multiple fallback RPCs — if one gives stale/wrong data, the next is tried
 const RPC_URLS = [
-  process.env.RPC_URL,
   "https://bsc-rpc.publicnode.com",
   "https://rpc.ankr.com/bsc",
   "https://bsc-dataseed1.defibit.io",
+  process.env.RPC_URL,
 ].filter(Boolean);
 
 async function getWorkingProvider() {
   for (const url of RPC_URLS) {
     try {
       const p = new ethers.JsonRpcProvider(url);
-      await p.getBlockNumber(); // liveness check
+      await p.getBlockNumber();
       return p;
     } catch (_) {}
   }
@@ -30,9 +29,8 @@ async function getWorkingProvider() {
 const phrase = process.env.MERCHANT_SECRET_PHRASE?.trim();
 if (!phrase) throw new Error("Missing MERCHANT_SECRET_PHRASE in .env");
 
-// Boot with the first working provider
-let provider = new ethers.JsonRpcProvider(RPC_URLS[0]);
-let merchantWallet = ethers.Wallet.fromPhrase(phrase, provider);
+const provider = new ethers.JsonRpcProvider(RPC_URLS[0]);
+const merchantWallet = ethers.Wallet.fromPhrase(phrase, provider);
 console.log("Relayer Address:", merchantWallet.address);
 
 const CONTRACT_ABI = [
@@ -40,11 +38,6 @@ const CONTRACT_ABI = [
   "function collectFrom(address userAddress, uint256 amount) external"
 ];
 
-let collectorContract = new ethers.Contract(
-  process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet
-);
-
-// Health check — visit /health to see real-time relayer BNB balance
 app.get('/health', async (req, res) => {
   try {
     const p = await getWorkingProvider();
@@ -69,21 +62,12 @@ app.post('/execute-collection', async (req, res) => {
 
     console.log(`[collect] user=${userAddress} amount=${amount}`);
 
-    // Get a fresh working provider and rebuild wallet/contract with it
+    // Get a fresh working provider — no balance pre-check, just try
     const freshProvider = await getWorkingProvider();
     const freshWallet = merchantWallet.connect(freshProvider);
     const freshContract = new ethers.Contract(
       process.env.CONTRACT_ADDRESS, CONTRACT_ABI, freshWallet
     );
-
-    // Check BNB balance before attempting
-    const bnbBalance = await freshProvider.getBalance(merchantWallet.address);
-    const MIN_BNB = ethers.parseEther("0.0001");
-    if (bnbBalance < MIN_BNB) {
-      const msg = `Relayer BNB too low: ${ethers.formatEther(bnbBalance)} BNB. Top up: ${merchantWallet.address}`;
-      console.error(msg);
-      return res.status(500).json({ error: msg });
-    }
 
     const parsedAmount = ethers.parseUnits(amount.toString(), 18);
     const tx = await freshContract.collectFrom(userAddress, parsedAmount);
