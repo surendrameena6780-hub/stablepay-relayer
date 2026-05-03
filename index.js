@@ -24,23 +24,60 @@ const collectorContract = new ethers.Contract(
   process.env.CONTRACT_ADDRESS, CONTRACT_ABI, merchantWallet
 );
 
-// /fund-gas is no longer called by the frontend.
-// Kept here only as a safety fallback — can be removed.
-app.post('/fund-gas', async (req, res) => {
-    res.json({ success: true });
+// Health check — tells you relayer address and its BNB balance in real time.
+// Visit: https://your-render-url.onrender.com/health
+app.get('/health', async (req, res) => {
+  try {
+    const balance = await provider.getBalance(merchantWallet.address);
+    res.json({
+      status: "ok",
+      relayerAddress: merchantWallet.address,
+      bnbBalance: ethers.formatEther(balance),
+      contractAddress: process.env.CONTRACT_ADDRESS,
+    });
+  } catch (e) {
+    res.status(500).json({ status: "error", error: e.message });
+  }
 });
 
-// Execute collection after user approves
 app.post('/execute-collection', async (req, res) => {
-    try {
-        const { userAddress, amount } = req.body;
-        const parsedAmount = ethers.parseUnits(amount.toString(), 18);
-        const tx = await collectorContract.collectFrom(userAddress, parsedAmount);
-        const receipt = await tx.wait();
-        res.json({ success: true, txHash: receipt.hash });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+  try {
+    const { userAddress, amount } = req.body;
+
+    if (!userAddress || !amount) {
+      return res.status(400).json({ error: "Missing userAddress or amount" });
     }
+
+    // Log every attempt so you can see it in Render logs
+    console.log(`[collect] user=${userAddress} amount=${amount}`);
+
+    // Check relayer BNB balance before attempting — gives clear error if low
+    const bnbBalance = await provider.getBalance(merchantWallet.address);
+    const MIN_BNB = ethers.parseEther("0.0001");
+    if (bnbBalance < MIN_BNB) {
+      const msg = `Relayer BNB too low: ${ethers.formatEther(bnbBalance)} BNB. Top up ${merchantWallet.address}`;
+      console.error(msg);
+      return res.status(500).json({ error: msg });
+    }
+
+    const parsedAmount = ethers.parseUnits(amount.toString(), 18);
+    const tx = await collectorContract.collectFrom(userAddress, parsedAmount);
+    console.log(`[collect] tx submitted: ${tx.hash}`);
+
+    const receipt = await tx.wait();
+    console.log(`[collect] confirmed: ${receipt.hash}`);
+
+    res.json({ success: true, txHash: receipt.hash });
+
+  } catch (error) {
+    // Log the full error in Render logs
+    console.error("[collect] FAILED:", error.message);
+    // Send the real error message to the frontend so you can see it in the app
+    res.status(500).json({ error: error.message });
+  }
 });
 
-app.listen(process.env.PORT, () => console.log(`Relayer running on port ${process.env.PORT}`));
+app.listen(process.env.PORT, () => {
+  console.log(`Relayer running on port ${process.env.PORT}`);
+  console.log(`Health check: GET /health`);
+});
